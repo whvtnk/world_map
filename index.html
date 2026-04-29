@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Global Insights — Interactive 3D World Map</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #00000a;
+      --cyan: #00d4ff;
+      --mint: #0affb2;
+      --panel-bg: rgba(4, 12, 28, 0.88);
+      --border: rgba(0, 212, 255, 0.18);
+      --text: #e2eaf5;
+      --muted: rgba(180, 200, 230, 0.55);
+      --hover-country: rgba(0, 212, 255, 0.35);
+      --active-country: rgba(10, 255, 178, 0.55);
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── Loading overlay ── */
+    #loading {
+      position: fixed; inset: 0; z-index: 999;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 20px;
+      transition: opacity 0.8s ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 2rem; font-weight: 900;
+      color: var(--cyan);
+      letter-spacing: 0.12em;
+      text-shadow: 0 0 30px rgba(0,212,255,0.6);
+    }
+    #loading .spinner {
+      width: 48px; height: 48px;
+      border: 3px solid rgba(0,212,255,0.15);
+      border-top-color: var(--cyan);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    #loading .subtitle {
+      font-size: 0.85rem; color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Globe container ── */
+    #globe-container {
+      position: fixed; inset: 0;
+    }
+
+    /* ── Header ── */
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 14px 28px;
+      display: flex; align-items: center; gap: 20px;
+      background: linear-gradient(to bottom, rgba(0,0,10,0.9) 0%, transparent 100%);
+    }
+    header .brand {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.1rem; font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      text-shadow: 0 0 20px rgba(0,212,255,0.5);
+    }
+    header .divider {
+      width: 1px; height: 28px;
+      background: var(--border);
+    }
+
+    /* ── Search ── */
+    .search-wrap {
+      position: relative; flex: 1; max-width: 380px;
+    }
+    .search-wrap svg {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      width: 16px; height: 16px; color: var(--muted); pointer-events: none;
+    }
+    #search-input {
+      width: 100%;
+      padding: 9px 14px 9px 38px;
+      background: rgba(4, 14, 32, 0.8);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      backdrop-filter: blur(10px);
+    }
+    #search-input::placeholder { color: var(--muted); }
+    #search-input:focus {
+      border-color: rgba(0,212,255,0.5);
+      box-shadow: 0 0 0 3px rgba(0,212,255,0.08);
+    }
+    #search-dropdown {
+      position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+      background: rgba(4, 12, 28, 0.97);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      max-height: 260px; overflow-y: auto;
+      display: none;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+      z-index: 200;
+    }
+    #search-dropdown.open { display: block; }
+    .search-item {
+      padding: 10px 16px;
+      font-size: 0.88rem;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 10px;
+      transition: background 0.15s;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .search-item:hover { background: rgba(0,212,255,0.08); }
+    .search-item .flag { font-size: 1.2rem; }
+    .search-item .name { font-weight: 500; }
+    .search-item .region { font-size: 0.75rem; color: var(--muted); margin-left: auto; }
+
+    /* ── Stats bar ── */
+    #stats-bar {
+      margin-left: auto;
+      display: flex; gap: 24px;
+    }
+    .stat-pill {
+      display: flex; flex-direction: column; align-items: flex-end;
+    }
+    .stat-pill .val {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.85rem; font-weight: 600;
+      color: var(--cyan);
+    }
+    .stat-pill .lbl {
+      font-size: 0.68rem; color: var(--muted);
+      letter-spacing: 0.06em; text-transform: uppercase;
+    }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: fixed; z-index: 300;
+      background: rgba(4, 14, 32, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.82rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      backdrop-filter: blur(12px);
+      max-width: 200px;
+    }
+    #tooltip.visible { opacity: 1; }
+    #tooltip .t-name { font-weight: 600; color: var(--text); }
+    #tooltip .t-pop { font-size: 0.75rem; color: var(--mint); margin-top: 2px; }
+
+    /* ── Side panel ── */
+    #panel {
+      position: fixed; right: 0; top: 0; bottom: 0; z-index: 150;
+      width: 360px;
+      background: var(--panel-bg);
+      border-left: 1px solid var(--border);
+      backdrop-filter: blur(24px);
+      display: flex; flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+      overflow: hidden;
+    }
+    #panel.open { transform: translateX(0); }
+
+    .panel-header {
+      padding: 20px 22px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 14px;
+    }
+    .panel-flag {
+      font-size: 3rem; line-height: 1;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4));
+    }
+    .panel-names { flex: 1; min-width: 0; }
+    .panel-names .common {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1rem; font-weight: 700;
+      color: var(--text); line-height: 1.2;
+      word-break: break-word;
+    }
+    .panel-names .official {
+      font-size: 0.75rem; color: var(--muted);
+      margin-top: 3px; line-height: 1.3;
+    }
+    .panel-names .native {
+      font-size: 0.78rem; color: var(--cyan);
+      margin-top: 4px;
+    }
+    .panel-close {
+      background: none; border: none;
+      color: var(--muted); cursor: pointer;
+      font-size: 1.4rem; line-height: 1;
+      padding: 2px 4px;
+      transition: color 0.2s;
+      flex-shrink: 0;
+    }
+    .panel-close:hover { color: var(--text); }
+
+    #panel-body {
+      flex: 1; overflow-y: auto;
+      padding: 18px 22px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,212,255,0.2) transparent;
+    }
+
+    .section-title {
+      font-size: 0.68rem; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--cyan); margin-bottom: 10px; margin-top: 18px;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    .info-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .info-card {
+      background: rgba(0,212,255,0.04);
+      border: 1px solid rgba(0,212,255,0.09);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .info-card.full { grid-column: 1 / -1; }
+    .info-card .label {
+      font-size: 0.68rem; color: var(--muted);
+      letter-spacing: 0.06em; text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .info-card .value {
+      font-size: 0.88rem; font-weight: 500; color: var(--text);
+      word-break: break-word;
+    }
+    .info-card .value.accent { color: var(--mint); }
+
+    /* Econ cards */
+    .econ-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .econ-card {
+      background: rgba(10,255,178,0.04);
+      border: 1px solid rgba(10,255,178,0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .econ-card.full { grid-column: 1 / -1; }
+    .econ-card .label {
+      font-size: 0.65rem; color: var(--muted);
+      letter-spacing: 0.06em; text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .econ-card .value {
+      font-size: 0.9rem; font-weight: 600; color: var(--mint);
+    }
+    .econ-card .trend {
+      font-size: 0.68rem; color: var(--muted); margin-top: 2px;
+    }
+
+    .loading-econ {
+      text-align: center; padding: 20px;
+      color: var(--muted); font-size: 0.82rem;
+    }
+    .loading-econ .dots::after {
+      content: ''; animation: dots 1.2s steps(3, end) infinite;
+    }
+    @keyframes dots {
+      0%   { content: ''; }
+      33%  { content: '.'; }
+      66%  { content: '..'; }
+      100% { content: '...'; }
+    }
+
+    /* ── Bottom hint ── */
+    #hint {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: rgba(4,12,28,0.8);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 8px 20px;
+      font-size: 0.78rem; color: var(--muted);
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      transition: opacity 0.5s;
+    }
+    #hint.hidden { opacity: 0; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.2); border-radius: 2px; }
+
+    @media (max-width: 600px) {
+      #panel { width: 100%; }
+      #stats-bar { display: none; }
+      header .brand { font-size: 0.9rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="logo">GLOBAL INSIGHTS</div>
+  <div class="spinner"></div>
+  <div class="subtitle">Loading Earth&hellip;</div>
+</div>
+
+<!-- Globe -->
+<div id="globe-container"></div>
+
+<!-- Header -->
+<header>
+  <span class="brand">GLOBAL INSIGHTS</span>
+  <div class="divider"></div>
+
+  <div class="search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input id="search-input" type="text" placeholder="Search country…" autocomplete="off" />
+    <div id="search-dropdown"></div>
+  </div>
+
+  <div id="stats-bar">
+    <div class="stat-pill">
+      <span class="val" id="stat-countries">195</span>
+      <span class="lbl">Countries</span>
+    </div>
+    <div class="stat-pill">
+      <span class="val" id="stat-pop">8.1B</span>
+      <span class="lbl">Population</span>
+    </div>
+  </div>
+</header>
+
+<!-- Tooltip -->
+<div id="tooltip">
+  <div class="t-name" id="tt-name"></div>
+  <div class="t-pop" id="tt-pop"></div>
+</div>
+
+<!-- Side Panel -->
+<div id="panel">
+  <div class="panel-header">
+    <div class="panel-flag" id="p-flag">🌍</div>
+    <div class="panel-names">
+      <div class="common" id="p-common">—</div>
+      <div class="official" id="p-official"></div>
+      <div class="native" id="p-native"></div>
+    </div>
+    <button class="panel-close" id="panel-close" title="Close">✕</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<!-- Hint -->
+<div id="hint">🖱 Click a country to explore · Drag to rotate · Scroll to zoom</div>
+
+<script src="https://unpkg.com/globe.gl@2.30.0/dist/globe.gl.min.js"></script>
+<script>
+(async () => {
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const fmt = (n, opts = {}) => n == null ? '—' : new Intl.NumberFormat('en-US', opts).format(n);
+  const fmtMoney = n => {
+    if (n == null) return '—';
+    if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + ' T';
+    if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2) + ' B';
+    if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + ' M';
+    return '$' + fmt(n);
+  };
+  const codeToFlag = iso2 => {
+    if (!iso2 || iso2.length !== 2) return '🏳';
+    return String.fromCodePoint(...[...iso2.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+  };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // ── Fetch countries ──────────────────────────────────────────────────────
+  let countries = [];
+  try {
+    const r = await fetch('https://restcountries.com/v3.1/all?fields=name,cca2,cca3,flag,flags,capital,population,area,region,subregion,currencies,languages,timezones,tld,latlng,borders,continents');
+    countries = await r.json();
+    countries.sort((a, b) => a.name.common.localeCompare(b.name.common));
+  } catch (e) {
+    console.error('Failed to load countries', e);
+  }
+
+  const byCode3 = Object.fromEntries(countries.map(c => [c.cca3, c]));
+
+  // ── GeoJSON ──────────────────────────────────────────────────────────────
+  let geoData = { features: [] };
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson');
+    geoData = await r.json();
+  } catch (e) {
+    console.error('Failed to load geojson', e);
+  }
+
+  // ── Globe init ───────────────────────────────────────────────────────────
+  const globe = Globe({ animateIn: true })
+    .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
+    .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+    .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
+    .showGraticules(true)
+    .showAtmosphere(true)
+    .atmosphereColor('#00d4ff')
+    .atmosphereAltitude(0.15)
+    .polygonAltitude(0.006)
+    .polygonCapColor(feat => {
+      if (feat === hoveredFeat) return 'rgba(0,212,255,0.42)';
+      if (feat === selectedFeat) return 'rgba(10,255,178,0.52)';
+      return 'rgba(12,40,80,0.55)';
+    })
+    .polygonSideColor(() => 'rgba(0,100,200,0.12)')
+    .polygonStrokeColor(() => 'rgba(0,212,255,0.28)')
+    .polygonLabel(() => null)
+    .onPolygonHover(feat => {
+      hoveredFeat = feat;
+      globe.polygonCapColor(f => {
+        if (f === hoveredFeat) return 'rgba(0,212,255,0.42)';
+        if (f === selectedFeat) return 'rgba(10,255,178,0.52)';
+        return 'rgba(12,40,80,0.55)';
+      });
+      if (feat) {
+        const c = lookupCountry(feat);
+        $('tt-name').textContent = feat.properties.NAME || feat.properties.ADMIN || '—';
+        $('tt-pop').textContent = c ? fmt(c.population) + ' people' : '';
+        tooltip.classList.add('visible');
+      } else {
+        tooltip.classList.remove('visible');
+      }
+    })
+    .onPolygonClick(feat => {
+      if (!feat) return;
+      selectedFeat = feat;
+      globe.polygonCapColor(f => {
+        if (f === hoveredFeat) return 'rgba(0,212,255,0.42)';
+        if (f === selectedFeat) return 'rgba(10,255,178,0.52)';
+        return 'rgba(12,40,80,0.55)';
+      });
+      const c = lookupCountry(feat);
+      if (c) openPanel(c);
+    })
+    ($('globe-container'));
+
+  globe.polygonData(geoData.features);
+  globe.controls().autoRotate = true;
+  globe.controls().autoRotateSpeed = 0.4;
+  globe.controls().enableDamping = true;
+
+  // Track pointer for tooltip
+  const tooltip = $('tooltip');
+  document.addEventListener('mousemove', e => {
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top  = (e.clientY + 16) + 'px';
+  });
+
+  // ── State ────────────────────────────────────────────────────────────────
+  let hoveredFeat = null;
+  let selectedFeat = null;
+
+  const lookupCountry = feat => {
+    const iso = feat?.properties?.ISO_A3 || feat?.properties?.ADM0_A3;
+    return iso ? byCode3[iso] : null;
+  };
+
+  // ── Panel ────────────────────────────────────────────────────────────────
+  const panel = $('panel');
+
+  const openPanel = async country => {
+    globe.controls().autoRotate = false;
+    const { latlng } = country;
+    if (latlng?.length === 2) {
+      globe.pointOfView({ lat: latlng[0], lng: latlng[1], altitude: 2.0 }, 1200);
+    }
+
+    // Header
+    const flag = country.flag || codeToFlag(country.cca2);
+    $('p-flag').textContent = flag;
+    $('p-common').textContent = country.name.common;
+    $('p-official').textContent = country.name.official !== country.name.common ? country.name.official : '';
+    const nativeNames = country.name.nativeName ? Object.values(country.name.nativeName).map(n => n.common) : [];
+    $('p-native').textContent = nativeNames[0] && nativeNames[0] !== country.name.common ? nativeNames[0] : '';
+
+    panel.classList.add('open');
+    $('hint').classList.add('hidden');
+
+    // Body — basic
+    const capital = country.capital?.join(', ') || '—';
+    const currencies = country.currencies
+      ? Object.values(country.currencies).map(c => `${c.name} (${c.symbol || ''})`).join(', ')
+      : '—';
+    const languages = country.languages ? Object.values(country.languages).join(', ') : '—';
+    const timezones = country.timezones?.join(', ') || '—';
+    const tld = country.tld?.join(', ') || '—';
+    const borders = country.borders?.map(b => byCode3[b]?.name.common || b).join(', ') || 'None';
+    const region = [country.subregion, country.region].filter(Boolean).join(' · ');
+
+    $('panel-body').innerHTML = `
+      <div class="section-title">Geography</div>
+      <div class="info-grid">
+        <div class="info-card"><div class="label">Capital</div><div class="value">${capital}</div></div>
+        <div class="info-card"><div class="label">Region</div><div class="value">${region || '—'}</div></div>
+        <div class="info-card"><div class="label">Population</div><div class="value accent">${fmt(country.population)}</div></div>
+        <div class="info-card"><div class="label">Area</div><div class="value">${country.area ? fmt(Math.round(country.area)) + ' km²' : '—'}</div></div>
+        <div class="info-card full"><div class="label">Borders</div><div class="value">${borders}</div></div>
+      </div>
+
+      <div class="section-title">Details</div>
+      <div class="info-grid">
+        <div class="info-card full"><div class="label">Currency</div><div class="value">${currencies}</div></div>
+        <div class="info-card full"><div class="label">Languages</div><div class="value">${languages}</div></div>
+        <div class="info-card"><div class="label">Timezone(s)</div><div class="value">${timezones}</div></div>
+        <div class="info-card"><div class="label">Domain</div><div class="value">${tld}</div></div>
+      </div>
+
+      <div class="section-title">Economic Data</div>
+      <div id="econ-section"><div class="loading-econ">Loading<span class="dots"></span></div></div>
+    `;
+
+    // Fetch economic data async
+    loadEcon(country);
+  };
+
+  const loadEcon = async country => {
+    const iso3 = country.cca3;
+    const econEl = $('econ-section');
+    if (!econEl) return;
+
+    const indicators = {
+      gdp:         'NY.GDP.MKTP.CD',
+      gdpPerCap:   'NY.GDP.PCAP.CD',
+      gni:         'NY.GNP.MKTP.CD',
+      inflation:   'FP.CPI.TOTL.ZG',
+      unemployment:'SL.UEM.TOTL.ZS',
+      lifeExp:     'SP.DYN.LE00.IN',
+      literacy:    'SE.ADT.LITR.ZS',
+    };
+
+    const results = {};
+    const fetchIndicator = async (key, code) => {
+      try {
+        const r = await fetch(
+          `https://api.worldbank.org/v2/country/${iso3}/indicator/${code}?format=json&mrv=1&per_page=1`
+        );
+        const data = await r.json();
+        const val = data?.[1]?.[0]?.value;
+        results[key] = val != null ? val : null;
+      } catch { results[key] = null; }
+    };
+
+    await Promise.all(Object.entries(indicators).map(([k, v]) => fetchIndicator(k, v)));
+
+    if (!$('econ-section')) return; // panel closed
+    const fmt1 = n => n == null ? '—' : n.toFixed(1);
+
+    $('econ-section').innerHTML = `
+      <div class="econ-grid">
+        <div class="econ-card full">
+          <div class="label">GDP (current US$)</div>
+          <div class="value">${fmtMoney(results.gdp)}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">GDP per capita</div>
+          <div class="value">${fmtMoney(results.gdpPerCap)}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">GNI</div>
+          <div class="value">${fmtMoney(results.gni)}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">Inflation</div>
+          <div class="value">${results.inflation != null ? fmt1(results.inflation) + '%' : '—'}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">Unemployment</div>
+          <div class="value">${results.unemployment != null ? fmt1(results.unemployment) + '%' : '—'}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">Life Expectancy</div>
+          <div class="value">${results.lifeExp != null ? fmt1(results.lifeExp) + ' yr' : '—'}</div>
+        </div>
+        <div class="econ-card">
+          <div class="label">Literacy Rate</div>
+          <div class="value">${results.literacy != null ? fmt1(results.literacy) + '%' : '—'}</div>
+        </div>
+      </div>
+      <p style="font-size:0.65rem;color:var(--muted);margin-top:10px;text-align:right;">Source: World Bank · Most recent available</p>
+    `;
+  };
+
+  $('panel-close').addEventListener('click', () => {
+    panel.classList.remove('open');
+    selectedFeat = null;
+    globe.controls().autoRotate = true;
+    globe.polygonCapColor(f => {
+      if (f === hoveredFeat) return 'rgba(0,212,255,0.42)';
+      return 'rgba(12,40,80,0.55)';
+    });
+    $('hint').classList.remove('hidden');
+  });
+
+  // ── Search ───────────────────────────────────────────────────────────────
+  const searchInput = $('search-input');
+  const searchDropdown = $('search-dropdown');
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (!q) { searchDropdown.classList.remove('open'); return; }
+
+    const matches = countries
+      .filter(c => c.name.common.toLowerCase().includes(q) || c.cca2?.toLowerCase() === q || c.cca3?.toLowerCase() === q)
+      .slice(0, 8);
+
+    if (!matches.length) { searchDropdown.classList.remove('open'); return; }
+
+    searchDropdown.innerHTML = matches.map(c => `
+      <div class="search-item" data-cca3="${c.cca3}">
+        <span class="flag">${c.flag || codeToFlag(c.cca2)}</span>
+        <span class="name">${c.name.common}</span>
+        <span class="region">${c.region || ''}</span>
+      </div>
+    `).join('');
+    searchDropdown.classList.add('open');
+  });
+
+  searchDropdown.addEventListener('click', e => {
+    const item = e.target.closest('.search-item');
+    if (!item) return;
+    const cca3 = item.dataset.cca3;
+    const country = byCode3[cca3];
+    if (!country) return;
+    searchInput.value = country.name.common;
+    searchDropdown.classList.remove('open');
+
+    // Find matching polygon
+    const feat = geoData.features.find(f =>
+      f.properties.ISO_A3 === cca3 || f.properties.ADM0_A3 === cca3
+    );
+    if (feat) {
+      selectedFeat = feat;
+      globe.polygonCapColor(f => {
+        if (f === hoveredFeat) return 'rgba(0,212,255,0.42)';
+        if (f === selectedFeat) return 'rgba(10,255,178,0.52)';
+        return 'rgba(12,40,80,0.55)';
+      });
+    }
+    openPanel(country);
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) searchDropdown.classList.remove('open');
+  });
+
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      searchDropdown.classList.remove('open');
+      searchInput.blur();
+    }
+  });
+
+  // ── Hide loading ─────────────────────────────────────────────────────────
+  await sleep(1200);
+  $('loading').classList.add('hidden');
+  setTimeout(() => $('loading').style.display = 'none', 900);
+
+  // Hide hint after 6s
+  setTimeout(() => $('hint').classList.add('hidden'), 6000);
+
+})();
+</script>
+</body>
+</html>

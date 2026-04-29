@@ -57,6 +57,18 @@
     #loading .subtitle {
       font-size: 0.85rem; color: var(--muted);
       letter-spacing: 0.08em;
+      min-height: 1.2em;
+    }
+    #loading .progress-bar {
+      width: 200px; height: 2px;
+      background: rgba(0,212,255,0.15);
+      border-radius: 2px; overflow: hidden;
+    }
+    #loading .progress-fill {
+      height: 100%; width: 0%;
+      background: var(--cyan);
+      border-radius: 2px;
+      transition: width 0.3s ease;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -327,7 +339,8 @@
 <div id="loading">
   <div class="logo">GLOBAL INSIGHTS</div>
   <div class="spinner"></div>
-  <div class="subtitle">Loading Earth&hellip;</div>
+  <div class="progress-bar"><div class="progress-fill" id="prog"></div></div>
+  <div class="subtitle" id="load-status">Connecting…</div>
 </div>
 
 <!-- Globe -->
@@ -398,30 +411,85 @@
     if (!iso2 || iso2.length !== 2) return '🏳';
     return String.fromCodePoint(...[...iso2.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
   };
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const setStatus = (text, pct) => {
+    const s = $('load-status'); if (s) s.textContent = text;
+    const p = $('prog'); if (p) p.style.width = pct + '%';
+  };
 
-  // ── Fetch countries ──────────────────────────────────────────────────────
+  // ── Fetch countries + GeoJSON in parallel ────────────────────────────────
+  setStatus('Loading country data…', 10);
+
   let countries = [];
-  try {
-    const r = await fetch('https://restcountries.com/v3.1/all?fields=name,cca2,cca3,flag,flags,capital,population,area,region,subregion,currencies,languages,timezones,tld,latlng,borders,continents');
-    countries = await r.json();
+  let geoData = { features: [] };
+
+  const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json';
+  const COUNTRIES_URL = 'https://restcountries.com/v3.1/all?fields=name,cca2,cca3,flag,flags,capital,population,area,region,subregion,currencies,languages,timezones,tld,latlng,borders,continents';
+
+  // Numeric ISO 3166-1 → alpha-3 mapping (world-atlas uses numeric codes)
+  const numToAlpha3 = {"4":"AFG","8":"ALB","12":"DZA","24":"AGO","32":"ARG","36":"AUS","40":"AUT","50":"BGD","56":"BEL","64":"BTN","68":"BOL","76":"BRA","100":"BGR","104":"MMR","116":"KHM","120":"CMR","124":"CAN","152":"CHL","156":"CHN","170":"COL","180":"COD","188":"CRI","191":"HRV","192":"CUB","203":"CZE","208":"DNK","218":"ECU","818":"EGY","222":"SLV","231":"ETH","246":"FIN","250":"FRA","266":"GAB","276":"DEU","288":"GHA","320":"GTM","332":"HTI","340":"HND","348":"HUN","356":"IND","360":"IDN","364":"IRN","368":"IRQ","372":"IRL","376":"ISR","380":"ITA","388":"JAM","392":"JPN","400":"JOR","398":"KAZ","404":"KEN","408":"PRK","410":"KOR","414":"KWT","418":"LAO","422":"LBN","430":"LBR","434":"LBY","458":"MYS","484":"MEX","504":"MAR","508":"MOZ","524":"NPL","528":"NLD","554":"NZL","558":"NIC","566":"NGA","578":"NOR","586":"PAK","591":"PAN","604":"PER","608":"PHL","616":"POL","620":"PRT","630":"PRI","634":"QAT","642":"ROU","643":"RUS","682":"SAU","686":"SEN","694":"SLE","706":"SOM","710":"ZAF","724":"ESP","144":"LKA","729":"SDN","752":"SWE","756":"CHE","760":"SYR","158":"TWN","762":"TJK","764":"THA","792":"TUR","800":"UGA","804":"UKR","784":"ARE","826":"GBR","840":"USA","858":"URY","860":"UZB","862":"VEN","704":"VNM","887":"YEM","894":"ZMB","716":"ZWE","012":"DZA","384":"CIV","218":"ECU","740":"SUR","170":"COL","288":"GHA","792":"TUR","031":"AZE","051":"ARM","112":"BLR","598":"PNG","548":"VUT","242":"FJI","90":"SLB","316":"GUM","540":"NCL","876":"WLF","258":"PYF","772":"TKL","570":"NIU","574":"NFK","166":"CCK","086":"IOT","260":"ATF","334":"HMD","10":"ATA","074":"BVT","238":"FLK","239":"SGS","654":"SHN","612":"PCN","535":"BES","531":"CUW","533":"ABW","534":"SXM","796":"TCA","060":"BMU","136":"CYM","660":"AIA","092":"VGB","850":"VIR","580":"MNP","584":"MHL","583":"FSM","585":"PLW","520":"NRU","798":"TUV","882":"WSM","776":"TON","296":"KIR","090":"SLB","548":"VUT","598":"PNG","036":"AUS","554":"NZL","242":"FJI","044":"BHS","052":"BRB","084":"BLZ","096":"BRN","132":"CPV","140":"CAF","148":"TCD","174":"COM","178":"COG","204":"BEN","212":"DMA","214":"DOM","226":"GNQ","232":"ERI","233":"EST","262":"DJI","266":"GAB","270":"GMB","288":"GHA","308":"GRD","324":"GIN","328":"GUY","336":"VAT","352":"ISL","450":"MDG","454":"MWI","462":"MDV","466":"MLI","472":"CPV","478":"MRT","480":"MUS","496":"MNG","499":"MNE","516":"NAM","562":"NER","585":"PLW","598":"PNG","638":"REU","646":"RWA","659":"KNA","662":"LCA","670":"VCT","678":"STP","690":"SYC","702":"SGP","703":"SVK","705":"SVN","732":"ESH","740":"SUR","748":"SWZ","768":"TGO","780":"TTO","788":"TUN","800":"UGA","834":"TZA","895":"XKX"};
+
+  const [countriesRes, topoRes] = await Promise.allSettled([
+    fetch(COUNTRIES_URL).then(r => r.json()),
+    fetch(GEOJSON_URL).then(r => r.json()),
+  ]);
+
+  setStatus('Processing data…', 60);
+
+  if (countriesRes.status === 'fulfilled') {
+    countries = countriesRes.value;
     countries.sort((a, b) => a.name.common.localeCompare(b.name.common));
-  } catch (e) {
-    console.error('Failed to load countries', e);
+  } else {
+    console.error('Countries API failed', countriesRes.reason);
+  }
+
+  if (topoRes.status === 'fulfilled') {
+    // world-atlas returns TopoJSON — convert to GeoJSON inline (no lib needed)
+    const topo = topoRes.value;
+    const arcs = topo.arcs;
+    const scale = topo.transform?.scale || [1, 1];
+    const translate = topo.transform?.translate || [0, 0];
+
+    // Decode delta-encoded arc
+    const decodeArc = arc => {
+      let x = 0, y = 0;
+      return arc.map(([dx, dy]) => {
+        x += dx; y += dy;
+        return [x * scale[0] + translate[0], y * scale[1] + translate[1]];
+      });
+    };
+
+    // Stitch rings from arc indices
+    const stitchRing = indices => {
+      const pts = [];
+      for (const i of indices) {
+        const arc = i < 0 ? [...decodeArc(arcs[~i])].reverse() : decodeArc(arcs[i]);
+        pts.push(...arc.slice(0, -1));
+      }
+      if (pts.length) pts.push(pts[0]);
+      return pts;
+    };
+
+    const geoms = topo.objects.countries.geometries;
+    const features = geoms.map(g => {
+      let coordinates;
+      if (g.type === 'Polygon') {
+        coordinates = g.arcs.map(stitchRing);
+      } else if (g.type === 'MultiPolygon') {
+        coordinates = g.arcs.map(poly => poly.map(stitchRing));
+      }
+      const alpha3 = numToAlpha3[String(g.id)] || null;
+      return { type: 'Feature', properties: { ISO_A3: alpha3, NUM_ID: g.id }, geometry: { type: g.type, coordinates } };
+    }).filter(f => f.geometry.coordinates);
+
+    geoData = { type: 'FeatureCollection', features };
+  } else {
+    console.error('GeoJSON failed', topoRes.reason);
   }
 
   const byCode3 = Object.fromEntries(countries.map(c => [c.cca3, c]));
 
-  // ── GeoJSON ──────────────────────────────────────────────────────────────
-  let geoData = { features: [] };
-  try {
-    const r = await fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson');
-    geoData = await r.json();
-  } catch (e) {
-    console.error('Failed to load geojson', e);
-  }
-
   // ── Globe init ───────────────────────────────────────────────────────────
+  setStatus('Building 3D globe…', 72);
   const globe = Globe({ animateIn: true })
     .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
     .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
@@ -684,13 +752,27 @@
     }
   });
 
-  // ── Hide loading ─────────────────────────────────────────────────────────
-  await sleep(1200);
-  $('loading').classList.add('hidden');
-  setTimeout(() => $('loading').style.display = 'none', 900);
+  // ── Hide loading after globe textures are ready ──────────────────────────
+  setStatus('Rendering globe…', 85);
+  globe.onGlobeReady(() => {
+    setStatus('Ready!', 100);
+    setTimeout(() => {
+      $('loading').classList.add('hidden');
+      setTimeout(() => { const l = $('loading'); if (l) l.style.display = 'none'; }, 800);
+    }, 300);
+  });
+
+  // Fallback: hide after 8s even if onGlobeReady never fires
+  setTimeout(() => {
+    const l = $('loading');
+    if (l && !l.classList.contains('hidden')) {
+      l.classList.add('hidden');
+      setTimeout(() => { if (l) l.style.display = 'none'; }, 800);
+    }
+  }, 8000);
 
   // Hide hint after 6s
-  setTimeout(() => $('hint').classList.add('hidden'), 6000);
+  setTimeout(() => { const h = $('hint'); if (h) h.classList.add('hidden'); }, 6000);
 
 })();
 </script>
